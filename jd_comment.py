@@ -1,7 +1,16 @@
+# -*- coding: utf-8 -*-
+# 自动带图评价、追评、服务评价，需电脑端CK
+# @Time : 2022/11/4
+# @Author : @qiu-lzsnmb and @Dimlitter @Dylan
+# @File : auto_comment.py
+# 多账号评价，异常处理
+# 2023/3/28 修复乱码
+# 2023/4/19 当存在OPENAI_API_KEY环境变量时，启用AI评价；网络支持：1.环境变量OPENAI_API_BASE_URL反向代理、2.ProxyUrl代理、3.环境支持直连；
 '''
 new Env('自动评价');
 8 8 2 1 * https://raw.githubusercontent.com/6dylan6/auto_comment/main/jd_comment.py
 '''
+import argparse
 import copy
 import logging
 import os
@@ -9,13 +18,14 @@ import random
 import sys
 import time, re
 import urllib.parse
-import platform
+
 import toml
 
 try:
-	import jieba
+	import jieba  # just for linting
 	import jieba.analyse
 	import requests
+	# import yaml
 	from lxml import etree
 	import zhon.hanzi
 
@@ -28,17 +38,22 @@ except:
 	os.system('pip3 install urllib3==1.25.11 &> /dev/null')
 	import jieba
 	import jieba.analyse
+	# import yaml
 	from lxml import etree
 	import requests
 	import urllib.parse
 import jdspider
 
 # constants
+CONFIG_PATH = './config.yml'
+USER_CONFIG_PATH = './config.user.yml'
 ORDINARY_SLEEP_SEC = 10
 SUNBW_SLEEP_SEC = 5
 REVIEW_SLEEP_SEC = 10
 SERVICE_RATING_SLEEP_SEC = 15
 
+## logging with styles
+## Reference: https://stackoverflow.com/a/384125/12002560
 _COLORS = {
 	'black': 0,
 	'red': 1,
@@ -63,46 +78,6 @@ _FORMATTER_COLORS = {
 	'ERROR': _COLORS['red'],
 	'CRITICAL': _COLORS['red']
 }
-
-user_aiUSER_AI_AUTO_COMMENT = False
-AUTO_COMMENT_DEEPSEEK_BASE_URL = ""
-AUTO_COMMENT_DEEPSEEK_USER_TOKEN = ""
-
-
-def read_config_from_toml():
-	# 读取 jd_config.toml 配置文件
-	config_file_path = 'jd_config.toml'
-
-	try:
-		config = toml.load(config_file_path)
-		# 获取 deepseek 部分的配置
-		deepseek_config = config.get('deepseek', {})
-		result = False if not deepseek_config.get('USER_AI_AUTO_COMMENT', None) else True
-		return {"user_ai": result,
-				"deepseek_base_url": deepseek_config.get('AUTO_COMMENT_DEEPSEEK_BASE_URL', None),
-				"deepseek_base_token": deepseek_config.get('AUTO_COMMENT_DEEPSEEK_USER_TOKEN', None)}
-	except Exception as e:
-		print(f"读取jd_config.toml文件时出错: {e}")
-		return {}
-
-
-def read_config_from_env():
-	print("从环境变量读取的配置")
-	result = False if not os.environ.get("USER_AI_AUTO_COMMENT") else True
-	return {"user_ai": result,
-			"deepseek_base_url": os.environ["AUTO_COMMENT_DEEPSEEK_BASE_URL"],
-			"deepseek_base_token": os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]}
-
-
-def get_deepseek_config():
-	# 获取当前操作系统
-	current_system = platform.system()
-	if current_system == 'Darwin':  # macOS
-		return read_config_from_toml()
-	elif current_system == 'Linux':  # Linux
-		return read_config_from_env()
-	else:
-		raise Exception("不支持的操作系统: {}".format(current_system))
 
 
 def format_style_seqs(msg, use_style=True):
@@ -135,22 +110,21 @@ class StyleFormatter(logging.Formatter):
 
 
 # 评价生成
-def generation(pname, _class=0, _type=1):
-	user_ai = get_deepseek_config().get("user_ai")
-	# 配置中需要声明使用AI生成评价
-	if user_ai is True:
-		return 5, generation_ai(pname, _type)
+def generation(pname, _class=0, _type=1, opts=None):
+	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"] is True:
+		return 5, generation_ai(pname, opts)
+	opts = opts or {}
 	items = ['商品名']
 	items.clear()
 	items.append(pname)
-	print('Items: %s', items)
+	opts['logger'].debug('Items: %s', items)
 	loop_times = len(items)
-	print('Total loop times: %d', loop_times)
+	opts['logger'].debug('Total loop times: %d', loop_times)
 	for i, item in enumerate(items):
-		print('Loop: %d / %d', i + 1, loop_times)
-		print('Current item: %s', item)
+		opts['logger'].debug('Loop: %d / %d', i + 1, loop_times)
+		opts['logger'].debug('Current item: %s', item)
 		spider = jdspider.JDSpider(item, ck)
-		print('Successfully created a JDSpider instance')
+		opts['logger'].debug('Successfully created a JDSpider instance')
 		# 增加对增值服务的评价鉴别
 		if "赠品" in pname or "非实物" in pname or "京服无忧" in pname or "权益" in pname or "非卖品" in pname or "增值服务" in pname:
 			result = [
@@ -169,16 +143,18 @@ def generation(pname, _class=0, _type=1):
 			]
 		else:
 			result = spider.getData(4, 3)  # 这里可以自己改
-		print('Result: %s', result)
+		opts['logger'].debug('Result: %s', result)
 
 	# class 0是评价 1是提取id
 	try:
 		name = jieba.analyse.textrank(pname, topK=5, allowPOS='n')[0]
-		print('Name: %s', name)
+		opts['logger'].debug('Name: %s', name)
 	except Exception as e:
+		#    opts['logger'].warning(
+		#        'jieba textrank analysis error: %s, name fallback to "宝贝"', e)
 		name = "宝贝"
 	if _class == 1:
-		print('_class is 1. Directly return name')
+		opts['logger'].debug('_class is 1. Directly return name')
 		return name
 	else:
 		if _type == 1:
@@ -188,18 +164,18 @@ def generation(pname, _class=0, _type=1):
 		num = min(num, len(result))
 		# use `.join()` to improve efficiency
 		comments = ''.join(random.sample(result, num))
-		print('_type: %d', _type)
-		print('num: %d', num)
-		print('Raw comments: %s', comments)
+		opts['logger'].debug('_type: %d', _type)
+		opts['logger'].debug('num: %d', num)
+		opts['logger'].debug('Raw comments: %s', comments)
 
 		return 5, comments.replace("$", name)
 
 
-# deepseek评价生成
-def generation_ai(pname, _class=0, _type=1):
-	deepseek_base_url = get_deepseek_config().get("deepseek_base_url")
-	deepseek_base_token = get_deepseek_config().get("deepseek_base_token")
+# ChatGPT评价生成
+def generation_ai(pname, _class=0, _type=1, opts=None):
 	# 当存在 OPENAI_API_BASE_URL 时，使用反向代理
+	deepseek_base_url = os.environ.get("AUTO_COMMENT_DEEPSEEK_BASE_URL")
+	deepseek_base_token = os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]
 	if deepseek_base_url is None:
 		print("请先根据文档配置 deepseek [请求地址]")
 		return None
@@ -243,10 +219,10 @@ def generation_ai(pname, _class=0, _type=1):
 			# 提取并打印 content 中的内容
 			content = response_data.get('choices', [{}])[0].get('message', {}).get('content', '')
 			if len(content) > 1:
-				print("结果是:", content)
+				print("deepseek输出结果是:", content)
 				return content
 			else:
-				print(f"请求结果是：{response_data}")
+				print(f"deepseek请求结果是：{response_data}")
 		else:
 			print(f"请求失败，状态码: {response.status_code}, 错误信息: {response.text}")
 	except requests.exceptions.Timeout:
@@ -261,135 +237,115 @@ def generation_ai(pname, _class=0, _type=1):
 	return None
 
 
-# 查询全部评价
-def all_evaluate():
-	try:
-		N = {}
-		url = 'https://club.jd.com/myJdcomments/myJdcomment.action?'
-		print('URL: %s', url)
-		print('Fetching website data')
-		req = requests.get(url, headers=headers)
-		print(
-			'Successfully accepted the response with status code %d',
-			req.status_code)
-		if not req.ok:
-			print(
-				'Status code of the response is %d, not 200', req.status_code)
-		req_et = etree.HTML(req.text)
-		print('Successfully parsed an XML tree')
-		evaluate_data = req_et.xpath('//*[@id="main"]/div[2]/div[1]/div/ul/li')
-		loop_times = len(evaluate_data)
-		print('Total loop times: %d', loop_times)
-		for i, ev in enumerate(evaluate_data):
-			print('Loop: %d / %d', i + 1, loop_times)
-			na = ev.xpath('a/text()')[0]
-			print('na: %s', na)
-			# print(ev.xpath('b/text()')[0])
-			try:
-				num = ev.xpath('b/text()')[0]
-				print('num: %s', num)
-			except IndexError:
-				num = 0
-			N[na] = int(num)
-		return N
-	except Exception as e:
-		print(e)
-
-
 # 评价晒单
-def sunbw(N):
+def sunbw(N, opts=None):
 	try:
+		opts = opts or {}
 		Order_data = []
 		req_et = []
 		loop_times = 2
-		print('Fetching website data')
-		print('Total loop times: %d', loop_times)
+		opts['logger'].debug('Fetching website data')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for i in range(loop_times):
 			url = (f'https://club.jd.com/myJdcomments/myJdcomment.action?sort=0&'
 				   f'page={i + 1}')
-			print('URL: %s', url)
+			opts['logger'].debug('URL: %s', url)
 			req = requests.get(url, headers=headers)
-			print(
+			opts['logger'].debug(
 				'Successfully accepted the response with status code %d',
 				req.status_code)
 			if not req.ok:
-				print(
+				opts['logger'].warning(
 					'Status code of the response is %d, not 200', req.status_code)
 			req_et.append(etree.HTML(req.text))
-			print('Successfully parsed an XML tree')
-		print('Fetching data from XML trees')
-		print('Total loop times: %d', loop_times)
+			opts['logger'].debug('Successfully parsed an XML tree')
+		opts['logger'].debug('Fetching data from XML trees')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for idx, i in enumerate(req_et):
-			print('Loop: %d / %d', idx + 1, loop_times)
-			print('Fetching order data in the default XPath')
+			opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+			opts['logger'].debug('Fetching order data in the default XPath')
 			elems = i.xpath(
 				'//*[@id="main"]/div[2]/div[2]/table/tbody')
-			print('Count of fetched order data: %d', len(elems))
+			opts['logger'].debug('Count of fetched order data: %d', len(elems))
 			Order_data.extend(elems)
-		print(f"当前共有{N['待评价订单']}个评价。")
-		print('Commenting on items')
+		# if len(Order_data) != N['待评价订单']:
+		#    opts['logger'].debug(
+		#        'Count of fetched order data doesn\'t equal N["待评价订单"]')
+		#    opts['logger'].debug('Clear the list Order_data')
+		#    Order_data = []
+		#    opts['logger'].debug('Total loop times: %d', loop_times)
+		#    for idx, i in enumerate(req_et):
+		#        opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+		#        opts['logger'].debug('Fetching order data in another XPath')
+		#        elems = i.xpath(
+		#            '//*[@id="main"]/div[2]/div[2]/table')
+		#        opts['logger'].debug('Count of fetched order data: %d', len(elems))
+		#        Order_data.extend(elems)
+
+		opts['logger'].info(f"当前共有{N['待评价订单']}个评价。")
+		opts['logger'].debug('Commenting on items')
 		for i, Order in enumerate(reversed(Order_data)):
 			if i + 1 > 10:
-				print(f'\n已评价10个订单，跳出')
+				opts['logger'].info(f'\n已评价10个订单，跳出')
 				break
 			try:
 				oid = Order.xpath('tr[@class="tr-th"]/td/span[3]/a/text()')[0]
-				print('oid: %s', oid)
+				opts['logger'].debug('oid: %s', oid)
 				oname_data = Order.xpath(
 					'tr[@class="tr-bd"]/td[1]/div[1]/div[2]/div/a/text()')
-				print('oname_data: %s', oname_data)
+				opts['logger'].debug('oname_data: %s', oname_data)
 				pid_data = Order.xpath(
 					'tr[@class="tr-bd"]/td[1]/div[1]/div[2]/div/a/@href')
-				print('pid_data: %s', pid_data)
+				opts['logger'].debug('pid_data: %s', pid_data)
 			except IndexError:
-				print(f"第{i + 1}个订单未查找到商品，跳过。")
+				opts['logger'].warning(f"第{i + 1}个订单未查找到商品，跳过。")
 				continue
 			loop_times1 = min(len(oname_data), len(pid_data))
-			print('Commenting on orders')
-			print('Total loop times: %d', loop_times1)
+			opts['logger'].debug('Commenting on orders')
+			opts['logger'].debug('Total loop times: %d', loop_times1)
 			idx = 0
 			for oname, pid in zip(oname_data, pid_data):
 				pid = re.findall('(?<=jd.com/)[(0-9)*?]+', pid)
 				if len(pid) == 0:
 					continue
 				pid = pid[0]
-				print(f'\n开始第{i + 1}个订单: {oid}')
-				print('pid: %s', pid)
-				print('oid: %s', oid)
-				xing, Str = generation(oname)
-				print(f'评价信息：{xing}星  ' + Str)
+				opts['logger'].info(f'\n开始第{i + 1}个订单: {oid}')
+				opts['logger'].debug('pid: %s', pid)
+				opts['logger'].debug('oid: %s', oid)
+				xing, Str = generation(oname, opts=opts)
+				opts['logger'].info(f'评价信息：{xing}星  ' + Str)
 				# 获取图片
 				url1 = (f'https://club.jd.com/discussion/getProductPageImageCommentList'
 						f'.action?productId={pid}')
-				print('Fetching images using the default URL')
-				print('URL: %s', url1)
+				opts['logger'].debug('Fetching images using the default URL')
+				opts['logger'].debug('URL: %s', url1)
 				req1 = requests.get(url1, headers=headers)
-				print(
+				opts['logger'].debug(
 					'Successfully accepted the response with status code %d',
 					req1.status_code)
 				if not req1.ok:
-					print(
+					opts['logger'].warning(
 						'Status code of the response is %d, not 200', req1.status_code)
 				imgdata = req1.json()
-				print('Image data: %s', imgdata)
+				opts['logger'].debug('Image data: %s', imgdata)
 				if imgdata["imgComments"]["imgCommentCount"] > 10:
 					pnum = random.randint(2, int(imgdata["imgComments"]["imgCommentCount"] / 10) + 1)
-					print('Count of fetched image comments is 0')
-					print('Fetching images using another URL')
+					opts['logger'].debug('Count of fetched image comments is 0')
+					opts['logger'].debug('Fetching images using another URL')
 					url1 = (f'https://club.jd.com/discussion/getProductPageImage'
 							f'CommentList.action?productId={pid}&page={pnum}')
-					print('URL: %s', url1)
+					opts['logger'].debug('URL: %s', url1)
 					time.sleep(1)
 					req1 = requests.get(url1, headers=headers)
-					print(
+					opts['logger'].debug(
 						'Successfully accepted the response with status code %d',
 						req1.status_code)
 					if not req1.ok:
-						print(
+						opts['logger'].warning(
 							'Status code of the response is %d, not 200',
 							req1.status_code)
 					imgdata2 = req1.json()
-					print('Image data: %s', imgdata2)
+					opts['logger'].debug('Image data: %s', imgdata2)
 				try:
 					imgurl = random.choice(imgdata["imgComments"]["imgList"])["imageUrl"]
 					if ('imgdata2' in dir()):
@@ -399,17 +355,17 @@ def sunbw(N):
 				except Exception:
 					imgurl = ''
 					imgurl2 = ''
-				print('Image URL: %s', imgurl)
+				opts['logger'].debug('Image URL: %s', imgurl)
 
-				print(f'图片：{imgurl + "," + imgurl2}')
+				opts['logger'].info(f'图片：{imgurl + "," + imgurl2}')
 				# 提交晒单
-				print('Preparing for commenting')
+				opts['logger'].debug('Preparing for commenting')
 				url2 = "https://club.jd.com/myJdcomments/saveProductComment.action"
-				print('URL: %s', url2)
+				opts['logger'].debug('URL: %s', url2)
 				headers['Referer'] = ('https://club.jd.com/myJdcomments/orderVoucher.action')
 				headers['Origin'] = 'https://club.jd.com'
 				headers['Content-Type'] = 'application/x-www-form-urlencoded'
-				print('New header for this request: %s', headers)
+				opts['logger'].debug('New header for this request: %s', headers)
 				data = {
 					'orderId': oid,
 					'productId': pid,
@@ -419,11 +375,16 @@ def sunbw(N):
 					'saveStatus': 2,
 					'anonymousFlag': 1
 				}
-				print('Data: %s', data)
-				pj2 = requests.post(url2, headers=headers, data=data)
-				if pj2.ok:
-					print(f'提交成功！')
-				print('Sleep time (s): %.1f', ORDINARY_SLEEP_SEC)
+				opts['logger'].debug('Data: %s', data)
+				if not opts.get('dry_run'):
+					opts['logger'].debug('Sending comment request')
+					pj2 = requests.post(url2, headers=headers, data=data)
+					if pj2.ok:
+						opts['logger'].info(f'提交成功！')
+				else:
+					opts['logger'].debug(
+						'Skipped sending comment request in dry run')
+				opts['logger'].debug('Sleep time (s): %.1f', ORDINARY_SLEEP_SEC)
 				time.sleep(ORDINARY_SLEEP_SEC)
 				idx += 1
 		N['待评价订单'] -= 1
@@ -433,56 +394,71 @@ def sunbw(N):
 
 
 # 追评
-def review(N):
+def review(N, opts=None):
 	try:
+		opts = opts or {}
 		req_et = []
 		Order_data = []
 		loop_times = 2
-		print('Fetching website data')
-		print('Total loop times: %d', loop_times)
+		opts['logger'].debug('Fetching website data')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for i in range(loop_times):
-			print('Loop: %d / %d', i + 1, loop_times)
+			opts['logger'].debug('Loop: %d / %d', i + 1, loop_times)
 			url = (f"https://club.jd.com/myJdcomments/myJdcomment.action?sort=3"
 				   f"&page={i + 1}")
-			print('URL: %s', url)
+			opts['logger'].debug('URL: %s', url)
 			req = requests.get(url, headers=headers)
-			print(
+			opts['logger'].debug(
 				'Successfully accepted the response with status code %d',
 				req.status_code)
 			if not req.ok:
-				print(
+				opts['logger'].warning(
 					'Status code of the response is %d, not 200', req.status_code)
 			req_et.append(etree.HTML(req.text))
-			print('Successfully parsed an XML tree')
-		print('Fetching data from XML trees')
-		print('Total loop times: %d', loop_times)
+			opts['logger'].debug('Successfully parsed an XML tree')
+		opts['logger'].debug('Fetching data from XML trees')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for idx, i in enumerate(req_et):
-			print('Loop: %d / %d', idx + 1, loop_times)
-			print('Fetching order data in the default XPath')
+			opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+			opts['logger'].debug('Fetching order data in the default XPath')
 			elems = i.xpath(
 				'//*[@id="main"]/div[2]/div[2]/table/tr[@class="tr-bd"]')
-			print('Count of fetched order data: %d', len(elems))
+			opts['logger'].debug('Count of fetched order data: %d', len(elems))
 			Order_data.extend(elems)
-		print(f"当前共有{N['待追评']}个需要追评。")
-		print('Commenting on items')
+		# if len(Order_data) != N['待追评']:
+		#    opts['logger'].debug(
+		#        'Count of fetched order data doesn\'t equal N["待追评"]')
+		#    # NOTE: Need them?
+		#    # opts['logger'].debug('Clear the list Order_data')
+		#    # Order_data = []
+		#    opts['logger'].debug('Total loop times: %d', loop_times)
+		#    for idx, i in enumerate(req_et):
+		#        opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+		#        opts['logger'].debug('Fetching order data in another XPath')
+		#        elems = i.xpath(
+		#            '//*[@id="main"]/div[2]/div[2]/table/tbody/tr[@class="tr-bd"]')
+		#        opts['logger'].debug('Count of fetched order data: %d', len(elems))
+		#        Order_data.extend(elems)
+		opts['logger'].info(f"当前共有{N['待追评']}个需要追评。")
+		opts['logger'].debug('Commenting on items')
 		for i, Order in enumerate(reversed(Order_data)):
 			if i + 1 > 10:
-				print(f'\n已评价10个订单，跳出')
+				opts['logger'].info(f'\n已评价10个订单，跳出')
 				break
 			oname = Order.xpath('td[1]/div/div[2]/div/a/text()')[0]
 			_id = Order.xpath('td[3]/div/a/@href')[0]
-			print('_id: %s', _id)
+			opts['logger'].debug('_id: %s', _id)
 			url1 = ("https://club.jd.com/afterComments/"
 					"saveAfterCommentAndShowOrder.action")
-			print('URL: %s', url1)
+			opts['logger'].debug('URL: %s', url1)
 			pid, oid = _id.replace(
 				'http://club.jd.com/afterComments/productPublish.action?sku=',
 				"").split('&orderId=')
-			print('pid: %s', pid)
-			print('oid: %s', oid)
-			print(f'\n开始第{i + 1}个订单: {oid}')
-			_, context = generation(oname, _type=0)
-			print(f'追评内容：{context}')
+			opts['logger'].debug('pid: %s', pid)
+			opts['logger'].debug('oid: %s', oid)
+			opts['logger'].info(f'\n开始第{i + 1}个订单: {oid}')
+			_, context = generation(oname, _type=0, opts=opts)
+			opts['logger'].info(f'追评内容：{context}')
 			data1 = {
 				'orderId': oid,
 				'productId': pid,
@@ -490,11 +466,15 @@ def review(N):
 				'anonymousFlag': 1,
 				'score': 5
 			}
-			print('Data: %s', data1)
-			req_url1 = requests.post(url1, headers=headers, data=data1)
-			if req_url1.ok:
-				print(f'提交成功！')
-			print('Sleep time (s): %.1f', REVIEW_SLEEP_SEC)
+			opts['logger'].debug('Data: %s', data1)
+			if not opts.get('dry_run'):
+				opts['logger'].debug('Sending comment request')
+				req_url1 = requests.post(url1, headers=headers, data=data1)
+				if req_url1.ok:
+					opts['logger'].info(f'提交成功！')
+			else:
+				opts['logger'].debug('Skipped sending comment request in dry run')
+			opts['logger'].debug('Sleep time (s): %.1f', REVIEW_SLEEP_SEC)
 			time.sleep(REVIEW_SLEEP_SEC)
 			N['待追评'] -= 1
 		return N
@@ -503,49 +483,63 @@ def review(N):
 
 
 # 服务评价
-def Service_rating(N):
+def Service_rating(N, opts=None):
 	try:
+		opts = opts or {}
 		Order_data = []
 		req_et = []
 		loop_times = 2
-		print('Fetching website data')
-		print('Total loop times: %d', loop_times)
+		opts['logger'].debug('Fetching website data')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for i in range(loop_times):
-			print('Loop: %d / %d', i + 1, loop_times)
+			opts['logger'].debug('Loop: %d / %d', i + 1, loop_times)
 			url = (f"https://club.jd.com/myJdcomments/myJdcomment.action?sort=4"
 				   f"&page={i + 1}")
-			print('URL: %s', url)
+			opts['logger'].debug('URL: %s', url)
 			req = requests.get(url, headers=headers)
-			print(
+			opts['logger'].debug(
 				'Successfully accepted the response with status code %d',
 				req.status_code)
 			if not req.ok:
-				print(
+				opts['logger'].warning(
 					'Status code of the response is %d, not 200', req.status_code)
 			req_et.append(etree.HTML(req.text))
-			print('Successfully parsed an XML tree')
-		print('Fetching data from XML trees')
-		print('Total loop times: %d', loop_times)
+			opts['logger'].debug('Successfully parsed an XML tree')
+		opts['logger'].debug('Fetching data from XML trees')
+		opts['logger'].debug('Total loop times: %d', loop_times)
 		for idx, i in enumerate(req_et):
-			print('Loop: %d / %d', idx + 1, loop_times)
-			print('Fetching order data in the default XPath')
+			opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+			opts['logger'].debug('Fetching order data in the default XPath')
 			elems = i.xpath(
 				'//*[@id="main"]/div[2]/div[2]/table/tbody/tr[@class="tr-th"]')
-			print('Count of fetched order data: %d', len(elems))
+			opts['logger'].debug('Count of fetched order data: %d', len(elems))
 			Order_data.extend(elems)
-		print(f"当前共有{N['服务评价']}个需要服务评价。")
-		print('Commenting on items')
+		#    if len(Order_data) != N['服务评价']:
+		#        opts['logger'].debug(
+		#            'Count of fetched order data doesn\'t equal N["服务评价"]')
+		#        opts['logger'].debug('Clear the list Order_data')
+		#        Order_data = []
+		#        opts['logger'].debug('Total loop times: %d', loop_times)
+		#        for idx, i in enumerate(req_et):
+		#            opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
+		#            opts['logger'].debug('Fetching order data in another XPath')
+		#            elems = i.xpath(
+		#                '//*[@id="main"]/div[2]/div[2]/table/tr[@class="tr-bd"]')
+		#            opts['logger'].debug('Count of fetched order data: %d', len(elems))
+		#            Order_data.extend(elems)
+		opts['logger'].info(f"当前共有{N['服务评价']}个需要服务评价。")
+		opts['logger'].debug('Commenting on items')
 		for i, Order in enumerate(reversed(Order_data)):
 			if i + 1 > 10:
-				print(f'\n已评价10个订单，跳出')
+				opts['logger'].info(f'\n已评价10个订单，跳出')
 				break
 			# oname = Order.xpath('td[1]/div[1]/div[2]/div/a/text()')[0]
 			oid = Order.xpath('td[1]/span[3]/a/text()')[0]
-			print(f'\n开始第{i + 1}个订单: {oid}')
-			print('oid: %s', oid)
+			opts['logger'].info(f'\n开始第{i + 1}个订单: {oid}')
+			opts['logger'].debug('oid: %s', oid)
 			url1 = (f'https://club.jd.com/myJdcomments/insertRestSurvey.action'
 					f'?voteid=145&ruleid={oid}')
-			print('URL: %s', url1)
+			opts['logger'].debug('URL: %s', url1)
 			data1 = {
 				'oid': oid,
 				'gid': '32',
@@ -558,11 +552,16 @@ def Service_rating(N):
 				'ro899': f'899A{random.randint(4, 5)}',  # 快递员服务
 				'ro900': f'900A{random.randint(4, 5)}'  # 快递员服务
 			}
-			print('Data: %s', data1)
-			pj1 = requests.post(url1, headers=headers, data=data1)
-			if pj1.ok:
-				print(f'提交成功！')
-			print('Sleep time (s): %.1f', SERVICE_RATING_SLEEP_SEC)
+			opts['logger'].debug('Data: %s', data1)
+			if not opts.get('dry_run'):
+				opts['logger'].debug('Sending comment request')
+				pj1 = requests.post(url1, headers=headers, data=data1)
+				if pj1.ok:
+					opts['logger'].info(f'提交成功！')
+			else:
+				opts['logger'].debug('Skipped sending comment request in dry run')
+			# opts['logger'].info("\n " + pj1.text)
+			opts['logger'].debug('Sleep time (s): %.1f', SERVICE_RATING_SLEEP_SEC)
 			time.sleep(SERVICE_RATING_SLEEP_SEC)
 			N['服务评价'] -= 1
 		return N
@@ -570,40 +569,43 @@ def Service_rating(N):
 		print(e)
 
 
-def No():
-	print('-' * 20)
-	N = all_evaluate()
+def No(opts=None):
+	opts = opts or {}
+	opts['logger'].info('')
+	N = all_evaluate(opts)
 	s = '----'.join(['{} {}'.format(i, N[i]) for i in N])
-	print(s)
-	print('-' * 20)
+	opts['logger'].info(s)
+	opts['logger'].info('')
 	return N
 
 
-def main():
-	N = No()
-	print('N value after executing No(): %s', N)
+def main(opts=None):
+	opts = opts or {}
+	# opts['logger'].info("开始京东自动评价！")
+	N = No(opts)
+	opts['logger'].debug('N value after executing No(): %s', N)
 	if not N:
-		print('CK错误，请确认是否电脑版CK！')
+		opts['logger'].error('CK错误，请确认是否电脑版CK！')
 		return
 	if N['待评价订单'] != 0:
-		print("1.开始评价晒单")
-		N = sunbw(N)
-		print('N value after executing sunbw(): %s', N)
-		N = No()
-		print('N value after executing No(): %s', N)
+		opts['logger'].info("1.开始评价晒单")
+		N = sunbw(N, opts)
+		opts['logger'].debug('N value after executing sunbw(): %s', N)
+		N = No(opts)
+		opts['logger'].debug('N value after executing No(): %s', N)
 	if N['待追评'] != 0:
-		print("2.开始追评！")
-		N = review(N)
-		print('N value after executing review(): %s', N)
-		N = No()
-		print('N value after executing No(): %s', N)
+		opts['logger'].info("2.开始追评！")
+		N = review(N, opts)
+		opts['logger'].debug('N value after executing review(): %s', N)
+		N = No(opts)
+		opts['logger'].debug('N value after executing No(): %s', N)
 	if N['服务评价'] != 0:
-		print('3.开始服务评价')
-		N = Service_rating(N)
-		print('N value after executing Service_rating(): %s', N)
-		N = No()
-		print('N value after executing No(): %s', N)
-	print("该账号运行完成！")
+		opts['logger'].info('3.开始服务评价')
+		N = Service_rating(N, opts)
+		opts['logger'].debug('N value after executing Service_rating(): %s', N)
+		N = No(opts)
+		opts['logger'].debug('N value after executing No(): %s', N)
+	opts['logger'].info("该账号运行完成！")
 
 
 def get_ck():
@@ -631,13 +633,97 @@ def get_ck():
 		else:
 			cks.append(jd_cooke)
 	else:
-		print("CK错误，请确认是否电脑版CK！")
+		logger.info("CK错误，请确认是否电脑版CK！")
 		sys.exit(1)
-	print("已获取环境变量 CK")
+	logger.info("已获取环境变量 CK")
 	return cks
 
 
 if __name__ == '__main__':
+	# parse arguments
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--dry-run',
+						help='have a full run without comment submission',
+						action='store_true')
+	parser.add_argument('--log-level',
+						help='specify logging level (default: info)',
+						default='INFO')
+	parser.add_argument('-o', '--log-file', help='specify logging file')
+	args = parser.parse_args()
+	if args.log_level.upper() not in [
+		'DEBUG', 'WARN', 'INFO', 'ERROR', 'FATAL'
+		# NOTE: `WARN` is an alias of `WARNING`. `FATAL` is an alias of
+		# `CRITICAL`. Using these aliases is for developers' and users'
+		# convenience.
+		# NOTE: Now there is no logging on `CRITICAL` level.
+	]:
+		args.log_level = 'INFO'
+	else:
+		args.log_level = args.log_level.upper()
+	opts = {
+		'dry_run': args.dry_run,
+		'log_level': args.log_level
+	}
+	if "DEBUG" in os.environ and os.environ["DEBUG"] == 'true':
+		opts = {
+			'dry_run': args.dry_run,
+			'log_level': 'DEBUG'
+		}
+	if hasattr(args, 'log_file'):
+		opts['log_file'] = args.log_file
+	else:
+		opts['log_file'] = None
+
+	# logging on console
+	_logging_level = getattr(logging, opts['log_level'])
+	logger = logging.getLogger('comment')
+	logger.setLevel(level=_logging_level)
+	# NOTE: `%(levelname)s` will be parsed as the original name (`FATAL` ->
+	# `CRITICAL`, `WARN` -> `WARNING`).
+	# NOTE: The alignment number should set to 19 considering the style
+	# controling characters. When it comes to file logger, the number should
+	# set to 8.
+	formatter = StyleFormatter('%(asctime)s %(levelname)-19s %(message)s', "%F %T")
+	rawformatter = StyleFormatter('%(asctime)s %(levelname)-8s %(message)s', use_style=False)
+	console = logging.StreamHandler()
+	console.setLevel(_logging_level)
+	console.setFormatter(logging.Formatter('%(message)s'))
+	logger.addHandler(console)
+	opts['logger'] = logger
+	# It's a hack!!!
+	jieba.default_logger = logging.getLogger('jieba')
+	jieba.default_logger.setLevel(level=_logging_level)
+	jieba.default_logger.addHandler(console)
+	# It's another hack!!!
+	jdspider.default_logger = logging.getLogger('spider')
+	jdspider.default_logger.setLevel(level=_logging_level)
+	jdspider.default_logger.addHandler(console)
+
+	logger.debug('Successfully set up console logger')
+	logger.debug('CLI arguments: %s', args)
+	logger.debug('Opening the log file')
+	if opts['log_file']:
+		try:
+			handler = logging.FileHandler(opts['log_file'])
+		except Exception as e:
+			logger.error('Failed to open the file handler')
+			logger.error('Error message: %s', e)
+			sys.exit(1)
+		handler.setLevel(_logging_level)
+		handler.setFormatter(rawformatter)
+		logger.addHandler(handler)
+		jieba.default_logger.addHandler(handler)
+		jdspider.default_logger.addHandler(handler)
+		logger.debug('Successfully set up file logger')
+	logger.debug('Options passed to functions: %s', opts)
+	logger.debug('Builtin constants:')
+	logger.debug('  CONFIG_PATH: %s', CONFIG_PATH)
+	logger.debug('  USER_CONFIG_PATH: %s', USER_CONFIG_PATH)
+	logger.debug('  ORDINARY_SLEEP_SEC: %s', ORDINARY_SLEEP_SEC)
+	logger.debug('  SUNBW_SLEEP_SEC: %s', SUNBW_SLEEP_SEC)
+	logger.debug('  REVIEW_SLEEP_SEC: %s', REVIEW_SLEEP_SEC)
+	logger.debug('  SERVICE_RATING_SLEEP_SEC: %s', SERVICE_RATING_SLEEP_SEC)
+
 	cks = get_ck()
 	try:
 		i = 1
@@ -661,12 +747,12 @@ if __name__ == '__main__':
 				'Accept-Encoding': 'gzip, deflate, br',
 				'Accept-Language': 'zh-CN,zh;q=0.9',
 			}
-			print('Builtin HTTP request header: %s', headers)
-			print('Starting main processes')
-			print('\n开始第 ' + str(i) + ' 个账号评价...\n')
-			main()
+			logger.debug('Builtin HTTP request header: %s', headers)
+			logger.debug('Starting main processes')
+			logger.info('\n开始第 ' + str(i) + ' 个账号评价...\n')
+			main(opts)
 			i += 1
 	# NOTE: It needs 3,000 times to raise this exception. Do you really want to
 	# do like this?
 	except RecursionError:
-		print("多次出现未完成情况，程序自动退出")
+		logger.error("多次出现未完成情况，程序自动退出")
