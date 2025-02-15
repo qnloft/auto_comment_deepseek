@@ -236,6 +236,41 @@ def generation_ai(pname, _class=0, _type=1, opts=None):
 		print(f"自定义错误: {e}")
 	return None
 
+# 查询全部评价
+def all_evaluate(opts=None):
+	try:
+		opts = opts or {}
+		N = {}
+		url = 'https://club.jd.com/myJdcomments/myJdcomment.action?'
+		opts['logger'].debug('URL: %s', url)
+		opts['logger'].debug('Fetching website data')
+		req = requests.get(url, headers=headers)
+		opts['logger'].debug(
+			'Successfully accepted the response with status code %d',
+			req.status_code)
+		if not req.ok:
+			opts['logger'].warning(
+				'Status code of the response is %d, not 200', req.status_code)
+		req_et = etree.HTML(req.text)
+		opts['logger'].debug('Successfully parsed an XML tree')
+		evaluate_data = req_et.xpath('//*[@id="main"]/div[2]/div[1]/div/ul/li')
+		loop_times = len(evaluate_data)
+		opts['logger'].debug('Total loop times: %d', loop_times)
+		for i, ev in enumerate(evaluate_data):
+			opts['logger'].debug('Loop: %d / %d', i + 1, loop_times)
+			na = ev.xpath('a/text()')[0]
+			opts['logger'].debug('na: %s', na)
+			# print(ev.xpath('b/text()')[0])
+			try:
+				num = ev.xpath('b/text()')[0]
+				opts['logger'].debug('num: %s', num)
+			except IndexError:
+				# opts['logger'].warning('Can\'t find num content in XPath, fallback to 0')
+				num = 0
+			N[na] = int(num)
+		return N
+	except Exception as e:
+		print(e)
 
 # 评价晒单
 def sunbw(N, opts=None):
