@@ -111,8 +111,11 @@ class StyleFormatter(logging.Formatter):
 
 # 评价生成
 def generation(pname, _class=0, _type=1, opts=None):
+	print(f"读取配置：{"USER_AI_AUTO_COMMENT" in os.environ} , {os.environ["USER_AI_AUTO_COMMENT"] is True}")
 	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"] is True:
 		return 5, generation_ai(pname, opts)
+	else:
+		return 5, None
 	opts = opts or {}
 	items = ['商品名']
 	items.clear()
@@ -236,6 +239,7 @@ def generation_ai(pname, _class=0, _type=1, opts=None):
 		print(f"自定义错误: {e}")
 	return None
 
+
 # 查询全部评价
 def all_evaluate(opts=None):
 	try:
@@ -272,6 +276,7 @@ def all_evaluate(opts=None):
 	except Exception as e:
 		print(e)
 
+
 # 评价晒单
 def sunbw(N, opts=None):
 	try:
@@ -303,20 +308,6 @@ def sunbw(N, opts=None):
 				'//*[@id="main"]/div[2]/div[2]/table/tbody')
 			opts['logger'].debug('Count of fetched order data: %d', len(elems))
 			Order_data.extend(elems)
-		# if len(Order_data) != N['待评价订单']:
-		#    opts['logger'].debug(
-		#        'Count of fetched order data doesn\'t equal N["待评价订单"]')
-		#    opts['logger'].debug('Clear the list Order_data')
-		#    Order_data = []
-		#    opts['logger'].debug('Total loop times: %d', loop_times)
-		#    for idx, i in enumerate(req_et):
-		#        opts['logger'].debug('Loop: %d / %d', idx + 1, loop_times)
-		#        opts['logger'].debug('Fetching order data in another XPath')
-		#        elems = i.xpath(
-		#            '//*[@id="main"]/div[2]/div[2]/table')
-		#        opts['logger'].debug('Count of fetched order data: %d', len(elems))
-		#        Order_data.extend(elems)
-
 		opts['logger'].info(f"当前共有{N['待评价订单']}个评价。")
 		opts['logger'].debug('Commenting on items')
 		for i, Order in enumerate(reversed(Order_data)):
@@ -413,9 +404,9 @@ def sunbw(N, opts=None):
 				opts['logger'].debug('Data: %s', data)
 				if not opts.get('dry_run'):
 					opts['logger'].debug('Sending comment request')
-					pj2 = requests.post(url2, headers=headers, data=data)
-					if pj2.ok:
-						opts['logger'].info(f'提交成功！')
+				# pj2 = requests.post(url2, headers=headers, data=data)
+				# if pj2.ok:
+				# 	opts['logger'].info(f'提交成功！')
 				else:
 					opts['logger'].debug(
 						'Skipped sending comment request in dry run')
@@ -628,18 +619,18 @@ def main(opts=None):
 		opts['logger'].debug('N value after executing sunbw(): %s', N)
 		N = No(opts)
 		opts['logger'].debug('N value after executing No(): %s', N)
-	if N['待追评'] != 0:
-		opts['logger'].info("2.开始追评！")
-		N = review(N, opts)
-		opts['logger'].debug('N value after executing review(): %s', N)
-		N = No(opts)
-		opts['logger'].debug('N value after executing No(): %s', N)
-	if N['服务评价'] != 0:
-		opts['logger'].info('3.开始服务评价')
-		N = Service_rating(N, opts)
-		opts['logger'].debug('N value after executing Service_rating(): %s', N)
-		N = No(opts)
-		opts['logger'].debug('N value after executing No(): %s', N)
+	# if N['待追评'] != 0:
+	# 	opts['logger'].info("2.开始追评！")
+	# 	N = review(N, opts)
+	# 	opts['logger'].debug('N value after executing review(): %s', N)
+	# 	N = No(opts)
+	# 	opts['logger'].debug('N value after executing No(): %s', N)
+	# if N['服务评价'] != 0:
+	# 	opts['logger'].info('3.开始服务评价')
+	# 	N = Service_rating(N, opts)
+	# 	opts['logger'].debug('N value after executing Service_rating(): %s', N)
+	# 	N = No(opts)
+	# 	opts['logger'].debug('N value after executing No(): %s', N)
 	opts['logger'].info("该账号运行完成！")
 
 
