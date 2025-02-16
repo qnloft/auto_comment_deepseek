@@ -114,7 +114,7 @@ def generation(pname, _class=0, _type=1, opts=None):
 	print(f"读取配置：{'USER_AI_AUTO_COMMENT' in os.environ} , {os.environ['USER_AI_AUTO_COMMENT'].lower() == 'true'}")
 	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"].lower() == 'true':
 		print("deepseek开始生成评论信息！")
-		return 5, generation_ai(pname, opts)
+		return 5, generation_ai(pname, opts=opts)
 	else:
 		print("不使用AI进行评论！")
 		return 5, None
@@ -179,15 +179,19 @@ def generation(pname, _class=0, _type=1, opts=None):
 # ChatGPT评价生成
 def generation_ai(pname, _class=0, _type=1, opts=None):
 	# 当存在 OPENAI_API_BASE_URL 时，使用反向代理
-	deepseek_base_url = os.environ["AUTO_COMMENT_DEEPSEEK_BASE_URL"]
-	deepseek_base_token = os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]
-	print(f"读取到的deepseek配置为：{deepseek_base_url} , {deepseek_base_token}")
-	if deepseek_base_url is None:
-		print("请先根据文档配置 deepseek [请求地址]")
+
+	if "AUTO_COMMENT_DEEPSEEK_BASE_URL" not in os.environ:
+		print("请先根据文档配置 deepseek [请求地址] AUTO_COMMENT_DEEPSEEK_BASE_URL")
 		return None
-	if deepseek_base_token is None or (isinstance(deepseek_base_token, str) and len(deepseek_base_token) == 0):
+	deepseek_base_url = os.environ["AUTO_COMMENT_DEEPSEEK_BASE_URL"]
+
+	if "AUTO_COMMENT_DEEPSEEK_USER_TOKEN" not in os.environ or len(
+			os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]) == 0:
 		deepseek_base_token = "[userToken value]"
 		print("如 deepseek_free_api 已经配置 [DEEP_SEEK_CHAT_AUTHORIZATION] 可以忽略！")
+	else:
+		deepseek_base_token = os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]
+	print(f"读取到的deepseek配置为：{deepseek_base_url} , {deepseek_base_token}")
 	if _type == 0:
 		prompt = f"针对 {pname} 的使用一段时候后的追加评价，请用精简、口语化的风格进行评论"
 	else:
