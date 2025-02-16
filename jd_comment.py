@@ -111,8 +111,8 @@ class StyleFormatter(logging.Formatter):
 
 # 评价生成
 def generation(pname, _class=0, _type=1, opts=None):
-	print(f"读取配置：{'USER_AI_AUTO_COMMENT' in os.environ} , {os.environ['USER_AI_AUTO_COMMENT'] is True}")
-	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"] is True:
+	print(f"读取配置：{'USER_AI_AUTO_COMMENT' in os.environ} , {os.environ['USER_AI_AUTO_COMMENT'].lower() == 'true'}")
+	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"].lower() == 'true':
 		return 5, generation_ai(pname, opts)
 	else:
 		return 5, None
