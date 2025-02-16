@@ -113,8 +113,10 @@ class StyleFormatter(logging.Formatter):
 def generation(pname, _class=0, _type=1, opts=None):
 	print(f"读取配置：{'USER_AI_AUTO_COMMENT' in os.environ} , {os.environ['USER_AI_AUTO_COMMENT'].lower() == 'true'}")
 	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"].lower() == 'true':
+		print("deepseek开始生成评论信息！")
 		return 5, generation_ai(pname, opts)
 	else:
+		print("不使用AI进行评论！")
 		return 5, None
 	opts = opts or {}
 	items = ['商品名']
