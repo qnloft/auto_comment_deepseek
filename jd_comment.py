@@ -177,8 +177,9 @@ def generation(pname, _class=0, _type=1, opts=None):
 # ChatGPT评价生成
 def generation_ai(pname, _class=0, _type=1, opts=None):
 	# 当存在 OPENAI_API_BASE_URL 时，使用反向代理
-	deepseek_base_url = os.environ.get("AUTO_COMMENT_DEEPSEEK_BASE_URL")
+	deepseek_base_url = os.environ["AUTO_COMMENT_DEEPSEEK_BASE_URL"]
 	deepseek_base_token = os.environ["AUTO_COMMENT_DEEPSEEK_USER_TOKEN"]
+	print(f"读取到的deepseek配置为：{deepseek_base_url} , {deepseek_base_token}")
 	if deepseek_base_url is None:
 		print("请先根据文档配置 deepseek [请求地址]")
 		return None
