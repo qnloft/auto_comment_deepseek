@@ -115,9 +115,6 @@ def generation(pname, _class=0, _type=1, opts=None):
 	if "USER_AI_AUTO_COMMENT" in os.environ and os.environ["USER_AI_AUTO_COMMENT"].lower() == 'true':
 		print("deepseek开始生成评论信息！")
 		return 5, generation_ai(pname, opts=opts)
-	else:
-		print("不使用AI进行评论！")
-		return 5, None
 	opts = opts or {}
 	items = ['商品名']
 	items.clear()
@@ -411,9 +408,9 @@ def sunbw(N, opts=None):
 				opts['logger'].debug('Data: %s', data)
 				if not opts.get('dry_run'):
 					opts['logger'].debug('Sending comment request')
-				# pj2 = requests.post(url2, headers=headers, data=data)
-				# if pj2.ok:
-				# 	opts['logger'].info(f'提交成功！')
+				pj2 = requests.post(url2, headers=headers, data=data)
+				if pj2.ok:
+					opts['logger'].info(f'提交成功！')
 				else:
 					opts['logger'].debug(
 						'Skipped sending comment request in dry run')
@@ -626,18 +623,18 @@ def main(opts=None):
 		opts['logger'].debug('N value after executing sunbw(): %s', N)
 		N = No(opts)
 		opts['logger'].debug('N value after executing No(): %s', N)
-	# if N['待追评'] != 0:
-	# 	opts['logger'].info("2.开始追评！")
-	# 	N = review(N, opts)
-	# 	opts['logger'].debug('N value after executing review(): %s', N)
-	# 	N = No(opts)
-	# 	opts['logger'].debug('N value after executing No(): %s', N)
-	# if N['服务评价'] != 0:
-	# 	opts['logger'].info('3.开始服务评价')
-	# 	N = Service_rating(N, opts)
-	# 	opts['logger'].debug('N value after executing Service_rating(): %s', N)
-	# 	N = No(opts)
-	# 	opts['logger'].debug('N value after executing No(): %s', N)
+	if N['待追评'] != 0:
+		opts['logger'].info("2.开始追评！")
+		N = review(N, opts)
+		opts['logger'].debug('N value after executing review(): %s', N)
+		N = No(opts)
+		opts['logger'].debug('N value after executing No(): %s', N)
+	if N['服务评价'] != 0:
+		opts['logger'].info('3.开始服务评价')
+		N = Service_rating(N, opts)
+		opts['logger'].debug('N value after executing Service_rating(): %s', N)
+		N = No(opts)
+		opts['logger'].debug('N value after executing No(): %s', N)
 	opts['logger'].info("该账号运行完成！")
 
 
